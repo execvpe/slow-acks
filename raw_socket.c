@@ -19,17 +19,14 @@
 
 #define INTERFACE "wlp0s20f3"
 
-#define IP4_PACKET_SIZE (2 << 16)
-#define ETH_HEADER_SIZE (14)
-
-#define PACKET_SIZE (IP4_PACKET_SIZE + ETH_HEADER_SIZE)
+#define ETH_FRAME_SIZE (1522)
 
 const unsigned char gateway_mac[] = {0xcc, 0xce, 0x1e, 0x3a, 0x40, 0xe8};
 const unsigned char this_mac[]    = {0xa8, 0x7e, 0xea, 0x45, 0x13, 0x20};
 
 static int eth_sock = -1;
 static int fwd_sock = -1;
-static char payload[PACKET_SIZE];
+static char payload[ETH_FRAME_SIZE];
 
 static void die(const char *msg) {
 	perror(msg);
@@ -91,10 +88,10 @@ void send_eth_frame(char *buf, size_t len) {
 	// eh->ether_type = htons(ETH_P_IP);
 
 	if (sendto(fwd_sock, buf, len, 0, (struct sockaddr *) &sadr, sizeof(struct sockaddr_ll)) == -1) {
-		// if (errno == EMSGSIZE) {
-		// Ignore that :)
-		//		return;
-		//	}
+		if (errno == EMSGSIZE) {
+			// Ignore that :)
+			return;
+		}
 		die("sendto(2)");
 	}
 }
@@ -103,7 +100,7 @@ void main(void) {
 	create_sock();
 
 	while (1) {
-		size_t packet_size = receive_eth_frame(payload, PACKET_SIZE);
+		size_t packet_size = receive_eth_frame(payload, ETH_FRAME_SIZE);
 		char *buf          = payload;
 
 		buf += 14; // Drop ethernet frame
@@ -120,7 +117,6 @@ void main(void) {
 			continue;
 		}
 
-		printf("Incoming Packet: \n");
 		printf("Packet Size (bytes): %d\n", ntohs(ip_packet->tot_len));
 		printf("Frame Size (bytes): %d\n", packet_size);
 		printf("Source Address: %s\n", (char *) inet_ntoa(source_socket_address.sin_addr));
