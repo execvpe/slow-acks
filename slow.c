@@ -128,7 +128,7 @@ static void init(const char *interface, struct sockaddr_ll *sadr) {
 static ssize_t receive_eth_frame(struct ether_header *eh, size_t len) {
 	ssize_t packet_size = recvfrom(rcv_sock, eh, len, 0, NULL, NULL);
 	if (packet_size == -1) {
-		die("recvfrom");
+		die("recvfrom(2)");
 	}
 	return packet_size;
 }
@@ -148,6 +148,9 @@ static void send_eth_frame(struct ether_header *eh, size_t len, const struct soc
 }
 
 static void print_information(const struct ether_header *eh, size_t len) {
+	static size_t internal_counter = 0;
+
+	printf("Software Counter: %lu\n", internal_counter++);
 	printf("Eth Frame Size (bytes): %lu\n", len);
 
 #ifndef IPv4_ONLY
