@@ -8,6 +8,7 @@
 #include <net/if.h>          // struct ifreq
 #include <netinet/ether.h>   // struct ether_header
 #include <netinet/ip.h>      // struct iphdr
+#include <signal.h>          // sigaction()
 #include <stdbool.h>         // bool
 #include <stdio.h>           // printf()
 #include <stdlib.h>          // exit()
@@ -21,50 +22,110 @@
 
 #define ETH_FRAME_SIZE (1518) // 1522
 
-const unsigned char gateway_mac[] = {0xcc, 0xce, 0x1e, 0x3a, 0x40, 0xe8};
-const unsigned char this_mac[]    = {0xa8, 0x7e, 0xea, 0x45, 0x13, 0x20};
+#define IPv4_ONLY 1
 
-static const char *if_name  = NULL;
-static const char *fwd_addr = NULL;
+static uint8_t gateway_mac[] = {0xcc, 0xce, 0x1e, 0x3a, 0x40, 0xe8};
 
-static struct ether_header frame_data[ETH_FRAME_SIZE];
+static uint8_t interface_mac[6];
+
+static int rcv_sock = -1;
+static int fwd_sock = -1;
 
 static void die(const char *msg) {
-	perror(msg);
+	if (errno) {
+		fprintf(stderr, "[EXIT %d] (%s) %s\n", errno, strerror(errno), msg);
+	} else {
+		fprintf(stderr, "[EXIT] %s\n", msg);
+	}
+
 	exit(EXIT_FAILURE);
 }
 
-static void get_mac_addresses() {
+static void close_sockets(int signum) {
+	(void) signum;
+	if (rcv_sock != -1) {
+		close(rcv_sock);
+	}
+	if (fwd_sock != -1) {
+		close(fwd_sock);
+	}
+	write(STDOUT_FILENO, "Success\n", 8);
+}
+
+static void get_gateway_mac() {
 	// TODO
 }
 
-static void open_sockets(int *rcv_sock, int *fwd_sock) {
-	// ETH_P_IP:   only IPv4
-	// ETH_P_IPV6: only IPv6
-	// ETH_P_ALL:  all frames
-	*rcv_sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IP));
+static void init(const char *interface, struct sockaddr_ll *sadr) {
+	struct sigaction ign = {
+		.sa_handler = SIG_IGN,
+		.sa_flags   = SA_RESTART,
+	};
+	sigemptyset(&ign.sa_mask);
+	sigaction(SIGPIPE, &ign, NULL);
 
-	if (*rcv_sock == -1) {
+	struct sigaction term = {
+		.sa_handler = &close_sockets,
+	};
+	sigemptyset(&term.sa_mask);
+	sigaction(SIGTERM, &term, NULL);
+	sigaction(SIGINT, &term, NULL);
+
+	// ETH_P_IP:   IPv4 only
+	// ETH_P_IPV6: IPv6 only
+	// ETH_P_ALL:  All Frames
+#ifdef IPv4_ONLY
+	rcv_sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IP));
+#else
+	rcv_sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+#endif
+	if (rcv_sock == -1) {
 		die("socket(2)");
 	}
 
-	// Enable promiscuous mode (receive all packets)
-	// and bind to given interface
+	// IPPROTO_RAW:
+	fwd_sock = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+	if (fwd_sock == -1) {
+		die("socket(2)");
+	}
 
+	// Bind to given interface
 	struct ifreq ifr = {0};
-	strncpy(ifr.ifr_name, if_name, IFNAMSIZ - 1);
-	ifr.ifr_flags |= IFF_PROMISC;
-
-	ioctl(*rcv_sock, SIOCGIFINDEX, &ifr);
-
-	*fwd_sock = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
-
-	if (*fwd_sock == -1) {
-		die("socket(2)");
+	strncpy(ifr.ifr_name, interface, IFNAMSIZ - 1);
+	if (ioctl(fwd_sock, SIOCGIFINDEX, &ifr) == -1) {
+		die("ioctl(2)");
 	}
+
+	// Bind to given interface
+	// and enable promiscuous mode (receive all packets)
+	ifr.ifr_flags |= IFF_PROMISC;
+	if (ioctl(rcv_sock, SIOCGIFINDEX, &ifr) == -1) {
+		die("ioctl(2)");
+	}
+
+	// Collect interface metadata
+	struct ifreq if_idx = {0};
+	struct ifreq if_mac = {0};
+
+	// Get the index of the interface to send on
+	strncpy(if_idx.ifr_name, interface, IFNAMSIZ - 1);
+	if (ioctl(fwd_sock, SIOCGIFINDEX, &if_idx) == -1) {
+		die("ioctl(2)");
+	}
+	sadr->sll_ifindex = if_idx.ifr_ifindex;
+
+	// Get the MAC address of the interface to send on
+	strncpy(if_mac.ifr_name, interface, IFNAMSIZ - 1);
+	if (ioctl(fwd_sock, SIOCGIFHWADDR, &if_mac) == -1) {
+		die("ioctl(2)");
+	}
+	memcpy(interface_mac, &if_mac.ifr_hwaddr.sa_data, 6);
+	memcpy(sadr->sll_addr, gateway_mac, 6);
+
+	sadr->sll_halen = ETH_ALEN;
 }
 
-static ssize_t receive_eth_frame(int rcv_sock, struct ether_header *eh, size_t len) {
+static ssize_t receive_eth_frame(struct ether_header *eh, size_t len) {
 	ssize_t packet_size = recvfrom(rcv_sock, eh, len, 0, NULL, NULL);
 	if (packet_size == -1) {
 		die("recvfrom");
@@ -72,39 +133,12 @@ static ssize_t receive_eth_frame(int rcv_sock, struct ether_header *eh, size_t l
 	return packet_size;
 }
 
-static void send_eth_frame(int fwd_sock, struct ether_header *eh, size_t len) {
-	static bool init               = false;
-	static struct ifreq if_idx     = {0};
-	static struct ifreq if_mac     = {0};
-	static struct sockaddr_ll sadr = {0};
-
-	if (!init) {
-		// Get the index of the interface to send on
-		strncpy(if_idx.ifr_name, if_name, IFNAMSIZ - 1);
-		if (ioctl(fwd_sock, SIOCGIFINDEX, &if_idx) < 0) {
-			die("ioctl(2)");
-		}
-
-		// Get the MAC address of the interface to send on
-		strncpy(if_mac.ifr_name, if_name, IFNAMSIZ - 1);
-		if (ioctl(fwd_sock, SIOCGIFHWADDR, &if_mac) < 0) {
-			die("ioctl(2)");
-		}
-
-		sadr.sll_ifindex = if_idx.ifr_ifindex;
-		sadr.sll_halen   = ETH_ALEN;
-
-		init = true;
-	}
-
+static void send_eth_frame(struct ether_header *eh, size_t len, const struct sockaddr_ll *sadr) {
 	// Set destination MAC address
-	for (int i = 0; i < 6; i++) {
-		eh->ether_shost[i] = ((uint8_t *) &if_mac.ifr_hwaddr.sa_data)[i];
-		eh->ether_dhost[i] = gateway_mac[i];
-		sadr.sll_addr[i]   = gateway_mac[i];
-	}
+	memcpy(eh->ether_shost, interface_mac, 6);
+	memcpy(eh->ether_dhost, gateway_mac, 6);
 
-	if (sendto(fwd_sock, eh, len, 0, (struct sockaddr *) &sadr, sizeof(struct sockaddr_ll)) == -1) {
+	if (sendto(fwd_sock, eh, len, 0, (struct sockaddr *) sadr, sizeof(struct sockaddr_ll)) == -1) {
 		if (errno == EMSGSIZE) {
 			// Ignore that :)
 			return;
@@ -116,15 +150,17 @@ static void send_eth_frame(int fwd_sock, struct ether_header *eh, size_t len) {
 static void print_information(const struct ether_header *eh, size_t len) {
 	printf("Eth Frame Size (bytes): %lu\n", len);
 
-	//	if (eh->ether_type == htons(0x86dd)) { // IPv6 (0x86dd)
-	//		printf("IPv6 - Skipping...\n");
-	//		return;
-	// }
+#ifndef IPv4_ONLY
+	if (eh->ether_type == htons(0x86dd)) { // IPv6 (0x86dd)
+		printf("IPv6 - Skipping...\n");
+		return;
+	}
 
 	if (eh->ether_type != htons(0x0800)) { // IPv4 (0x0800)
 		printf("Unknown ether type - Skipping...\n");
 		return;
 	}
+#endif
 
 	struct iphdr *ip_packet = (struct iphdr *) (eh + 1);
 	printf("IP Packet Size (bytes): %d\n", ntohs(ip_packet->tot_len));
@@ -146,16 +182,19 @@ static void print_mac_addresses(const struct ether_header *eh) {
 		   eh->ether_dhost[3], eh->ether_dhost[4], eh->ether_dhost[5]);
 }
 
-static bool is_valid_frame(const struct ether_header *eh) {
+static bool is_valid_frame(const struct ether_header *eh, const char *fwd_address) {
+#ifndef IPv4_ONLY
 	if (eh->ether_type != htons(0x0800)) { // IPv4 (0x0800)
 		return false;
 	}
+#endif
 
 	struct iphdr *ip_packet                  = (struct iphdr *) (eh + 1);
 	struct sockaddr_in source_socket_address = {0};
 	source_socket_address.sin_addr.s_addr    = ip_packet->saddr;
 
-	return (strcmp((char *) inet_ntoa(source_socket_address.sin_addr), fwd_addr) == 0);
+	// Surely there are better ways to solve this, but I don't care at the moment...
+	return (strcmp((char *) inet_ntoa(source_socket_address.sin_addr), fwd_address) == 0);
 }
 
 int main(int argc, char **argv) {
@@ -164,29 +203,28 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	if_name  = argv[1];
-	fwd_addr = argv[2];
+	get_gateway_mac();
 
-	get_mac_addresses();
+	struct sockaddr_ll sadr = {0};
+	init(argv[1], &sadr);
 
-	int rcv_sock = -1;
-	int fwd_sock = -1;
-	open_sockets(&rcv_sock, &fwd_sock);
+	struct ether_header frame_data[ETH_FRAME_SIZE];
+	size_t recv_size;
 
 	while (1) {
 		printf("\n");
 
-		size_t recv_size = (size_t) receive_eth_frame(rcv_sock, frame_data, ETH_FRAME_SIZE);
+		recv_size = (size_t) receive_eth_frame(frame_data, ETH_FRAME_SIZE);
 
 		print_information(frame_data, recv_size);
 
-		if (!is_valid_frame(frame_data)) {
+		if (!is_valid_frame(frame_data, argv[2])) {
 			continue;
 		}
 
 		print_mac_addresses(frame_data);
 
-		send_eth_frame(fwd_sock, frame_data, recv_size);
+		send_eth_frame(frame_data, recv_size, &sadr);
 
 		print_mac_addresses(frame_data);
 
