@@ -15,15 +15,25 @@
 #include "eth_packet.h"
 
 #define msleep(X) usleep(1000 * (X))
+#define WRITE(S) write(STDERR_FILENO, (S), strlen(S))
 
 #define ETH_FRAME_SIZE 2048 // (1518) to big // 1522 // 1514 ok
 
 static const uint8_t gateway_mac[] = {0xcc, 0xce, 0x1e, 0x3a, 0x40, 0xe8};
+static uint8_t raw_data[ETH_FRAME_SIZE];
 
-static void close_sockets(int signum) {
+static void release_and_clean(int signum) {
 	(void) signum;
+	WRITE("Interrupted.\n");
 
+	// Close raw sockets
 	eth_deinit();
+	WRITE("Sockets closed\n");
+
+	// Clear memory
+	memset(raw_data, 0x00, ETH_FRAME_SIZE);
+	WRITE("Memory cleared.\nExit successful.\n");
+	exit(EXIT_SUCCESS);
 }
 
 static void signal_init() {
@@ -35,7 +45,7 @@ static void signal_init() {
 	sigaction(SIGPIPE, &ign, NULL);
 
 	struct sigaction term = {
-		.sa_handler = &close_sockets,
+		.sa_handler = &release_and_clean,
 	};
 	sigemptyset(&term.sa_mask);
 	sigaction(SIGTERM, &term, NULL);
@@ -43,16 +53,17 @@ static void signal_init() {
 }
 
 int main(int argc, char **argv) {
-	if (argc < 3) {
+	if (argc < 4) {
 		fprintf(stderr, "Missing argument!\n");
 		exit(EXIT_FAILURE);
 	}
 
-	signal_init();
-	eth_init(argv[1], gateway_mac);
+	const int delay = atoi(argv[1]);
 
-	in_addr_t valid_adr = inet_addr(argv[2]);
-	uint8_t raw_data[ETH_FRAME_SIZE];
+	signal_init();
+	eth_init(argv[2], gateway_mac);
+
+	in_addr_t valid_adr             = inet_addr(argv[3]);
 	struct ether_header *frame_data = (void *) raw_data;
 	size_t recv_size;
 
@@ -71,7 +82,7 @@ int main(int argc, char **argv) {
 
 		eth_print_mac(frame_data);
 
-		msleep(10);
+		msleep(delay);
 	}
 
 	return EXIT_SUCCESS;
