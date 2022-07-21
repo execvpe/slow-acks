@@ -22,6 +22,7 @@
 #define WRITE(S) write(STDERR_FILENO, (S), strlen(S))
 
 #define ETH_FRAME_SIZE 2048 // 1514 ok
+#define PACKET_BUFFER_SIZE 512
 
 struct fwd_package {
 	size_t act_len;
@@ -66,7 +67,7 @@ static void *worker(void *arg) {
 
 	while (1) {
 		struct fwd_package *pak = bbuf_get(packet_buffer);
-		// nanosleep((struct timespec *) arg, NULL);
+		nanosleep((struct timespec *) arg, NULL);
 		eth_send_frame(pak->eh, pak->act_len);
 		free(pak);
 	}
@@ -86,7 +87,7 @@ int main(int argc, char **argv) {
 	const in_addr_t fwd_address = inet_addr(argv[3]);
 	eth_init(argv[2], gateway_mac);
 
-	packet_buffer = bbuf_create(32); // 1024
+	packet_buffer = bbuf_create(PACKET_BUFFER_SIZE);
 	if (packet_buffer == NULL) {
 		release_and_clean(SIGTERM);
 	}
