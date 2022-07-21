@@ -1,20 +1,62 @@
 CC = gcc
 CFLAGS = -Wall -Wformat=2 -Wshadow -Wconversion -std=gnu11 -Ofast
-RM = rm
 
-.PHONY: all cap clean nocap
+basedir = $(shell pwd)/
+
+build_path = $(basedir)/build/
+include_path = $(basedir)/include/
+source_path = $(basedir)/src/
 
 elf_name = slow
 
-all: cap
+sources = $(shell ls $(source_path) 2>/dev/null)
+modules = $(sources:%.c=%.c.o)
+
+# -----------------------------------------------------------------------
+
+MAKEFLAGS += --jobs=$(shell nproc)
+MAKEFLAGS += --output-sync=target
+
+vpath %.c   $(source_path)
+vpath %.h   $(include_path)
+
+vpath %.cpp $(source_path)
+vpath %.hpp $(include_path)
+
+vpath %.o   $(build_path)
+
+.PHONY: all cap clean
+
+# -----------------------------------------------------------------------
+
+all: $(elf_name)
 
 clean:
-	$(RM) $(elf_name)
+	rm -f $(elf_name)
+	rm -f $(build_path)/*.o
+
+debug: CFLAGS += -g
+debug: CXXFLAGS += -g
+debug: all
+
+# -----------------------------------------------------------------------
 
 cap: $(elf_name)
 	sudo setcap "CAP_NET_RAW+ep" $(elf_name)
 
-nocap: $(elf_name)
+# -----------------------------------------------------------------------
 
-$(elf_name): $(elf_name).c
-	$(CC) $(CFLAGS) -o $@ $^
+semaphore.c.o: semaphore.c semaphore.h
+bounded_buffer.c.o: bounded_buffer.c bounded_buffer.h semaphore.h
+
+# -----------------------------------------------------------------------
+
+$(elf_name): $(modules)
+	cd $(build_path) \
+	&& $(CXX) -o $(basedir)/$@ $^ $(libraries)
+
+%.c.o: %.c
+	$(CC) $(CFLAGS) -c -I$(include_path) $< -o $(build_path)/$@
+
+%.cpp.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c -I$(include_path) $< -o $(build_path)/$@
