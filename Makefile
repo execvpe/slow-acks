@@ -1,14 +1,20 @@
 CC = gcc
-CFLAGS = -Wall -Wformat=2 -Wshadow -Wconversion -std=gnu11
+CFLAGS = -Wall -Wformat=2 -Wshadow -Wconversion -std=gnu11 -Ofast
 RM = rm
 
-.PHONY: all clean
+.PHONY: all cap clean nocap
 
-all: slow
+elf_name = slow
+
+all: cap
 
 clean:
-	$(RM) slow
+	$(RM) $(elf_name)
 
-slow: slow.c
+cap: $(elf_name)
+	sudo setcap "CAP_NET_RAW+ep" $(elf_name)
+
+nocap: $(elf_name)
+
+$(elf_name): $(elf_name).c
 	$(CC) $(CFLAGS) -o $@ $^
-	sudo setcap "CAP_NET_RAW+ep" $@

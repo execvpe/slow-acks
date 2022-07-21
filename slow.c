@@ -20,7 +20,7 @@
 
 #define msleep(X) usleep(1000 * (X))
 
-#define ETH_FRAME_SIZE (1518) // 1522
+#define ETH_FRAME_SIZE 2048 // (1518) to big // 1522 // 1514 ok
 
 #define IPv4_ONLY 1
 
@@ -43,20 +43,20 @@ static void die(const char *msg) {
 
 static void close_sockets(int signum) {
 	(void) signum;
+
 	if (rcv_sock != -1) {
 		close(rcv_sock);
 	}
 	if (fwd_sock != -1) {
 		close(fwd_sock);
 	}
-	write(STDOUT_FILENO, "Success\n", 8);
 }
 
 static void get_gateway_mac() {
 	// TODO
 }
 
-static void init(const char *interface, struct sockaddr_ll *sadr) {
+static void init(const char *network_interface, struct sockaddr_ll *sadr) {
 	struct sigaction ign = {
 		.sa_handler = SIG_IGN,
 		.sa_flags   = SA_RESTART,
@@ -84,38 +84,38 @@ static void init(const char *interface, struct sockaddr_ll *sadr) {
 	}
 
 	// IPPROTO_RAW:
-	fwd_sock = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+	fwd_sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
 	if (fwd_sock == -1) {
 		die("socket(2)");
 	}
 
-	// Bind to given interface
+	// Bind to given network interface
 	struct ifreq ifr = {0};
-	strncpy(ifr.ifr_name, interface, IFNAMSIZ - 1);
+	strncpy(ifr.ifr_name, network_interface, IFNAMSIZ - 1);
 	if (ioctl(fwd_sock, SIOCGIFINDEX, &ifr) == -1) {
 		die("ioctl(2)");
 	}
 
-	// Bind to given interface
+	// Bind to given network interface
 	// and enable promiscuous mode (receive all packets)
 	ifr.ifr_flags |= IFF_PROMISC;
 	if (ioctl(rcv_sock, SIOCGIFINDEX, &ifr) == -1) {
 		die("ioctl(2)");
 	}
 
-	// Collect interface metadata
+	// Collect network interface metadata
 	struct ifreq if_idx = {0};
 	struct ifreq if_mac = {0};
 
-	// Get the index of the interface to send on
-	strncpy(if_idx.ifr_name, interface, IFNAMSIZ - 1);
+	// Get the index of the network interface to send on
+	strncpy(if_idx.ifr_name, network_interface, IFNAMSIZ - 1);
 	if (ioctl(fwd_sock, SIOCGIFINDEX, &if_idx) == -1) {
 		die("ioctl(2)");
 	}
 	sadr->sll_ifindex = if_idx.ifr_ifindex;
 
-	// Get the MAC address of the interface to send on
-	strncpy(if_mac.ifr_name, interface, IFNAMSIZ - 1);
+	// Get the MAC address of the network interface to send on
+	strncpy(if_mac.ifr_name, network_interface, IFNAMSIZ - 1);
 	if (ioctl(fwd_sock, SIOCGIFHWADDR, &if_mac) == -1) {
 		die("ioctl(2)");
 	}
@@ -125,7 +125,7 @@ static void init(const char *interface, struct sockaddr_ll *sadr) {
 	sadr->sll_halen = ETH_ALEN;
 }
 
-static ssize_t receive_eth_frame(struct ether_header *eh, size_t len) {
+static inline ssize_t receive_eth_frame(struct ether_header *eh, size_t len) {
 	ssize_t packet_size = recvfrom(rcv_sock, eh, len, 0, NULL, NULL);
 	if (packet_size == -1) {
 		die("recvfrom(2)");
@@ -133,14 +133,15 @@ static ssize_t receive_eth_frame(struct ether_header *eh, size_t len) {
 	return packet_size;
 }
 
-static void send_eth_frame(struct ether_header *eh, size_t len, const struct sockaddr_ll *sadr) {
+static inline void send_eth_frame(struct ether_header *eh, size_t len, const struct sockaddr_ll *sadr) {
 	// Set destination MAC address
 	memcpy(eh->ether_shost, interface_mac, 6);
 	memcpy(eh->ether_dhost, gateway_mac, 6);
 
 	if (sendto(fwd_sock, eh, len, 0, (struct sockaddr *) sadr, sizeof(struct sockaddr_ll)) == -1) {
 		if (errno == EMSGSIZE) {
-			// Ignore that :)
+			// Probably a corrupt package or MTU to small
+			// So... Ignore that :)
 			return;
 		}
 		die("sendto(2)");
@@ -185,7 +186,7 @@ static void print_mac_addresses(const struct ether_header *eh) {
 		   eh->ether_dhost[3], eh->ether_dhost[4], eh->ether_dhost[5]);
 }
 
-static bool is_valid_frame(const struct ether_header *eh, const char *fwd_address) {
+static inline bool is_valid_frame(const struct ether_header *eh, const char *fwd_address) {
 #ifndef IPv4_ONLY
 	if (eh->ether_type != htons(0x0800)) { // IPv4 (0x0800)
 		return false;
