@@ -134,7 +134,7 @@ bool eth_match_src_addr(const struct ether_header *eh, size_t act_len, const in_
 void eth_print_details(const struct ether_header *eh, size_t act_len) {
 	static size_t internal_counter = 0;
 
-	printf("Software Counter: %lu\n", internal_counter++);
+	printf("Debug Packet Count: %lu\n", internal_counter++);
 	printf("Eth Frame Size (bytes): %lu\n", act_len);
 
 #ifndef IPv4_ONLY

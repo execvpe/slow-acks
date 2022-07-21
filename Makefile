@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wformat=2 -Wshadow -Wconversion -std=gnu11 -Ofast
+CFLAGS = -Wall -Wformat=2 -Wshadow -Wconversion -std=gnu11 -pthread -Ofast
 
 basedir = $(shell pwd)/
 
@@ -19,9 +19,6 @@ MAKEFLAGS += --output-sync=target
 
 vpath %.c   $(source_path)
 vpath %.h   $(include_path)
-
-vpath %.cpp $(source_path)
-vpath %.hpp $(include_path)
 
 vpath %.o   $(build_path)
 
@@ -53,10 +50,7 @@ bounded_buffer.c.o: bounded_buffer.c bounded_buffer.h semaphore.h
 
 $(elf_name): $(modules)
 	cd $(build_path) \
-	&& $(CXX) -o $(basedir)/$@ $^ $(libraries)
+	&& $(CC) $(CFLAGS) -o $(basedir)/$@ $^ $(libraries)
 
 %.c.o: %.c
 	$(CC) $(CFLAGS) -c -I$(include_path) $< -o $(build_path)/$@
-
-%.cpp.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c -I$(include_path) $< -o $(build_path)/$@
