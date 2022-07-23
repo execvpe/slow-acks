@@ -14,7 +14,7 @@ ssize_t eth_receive_frame(struct ether_header *eh, size_t max_len);
 
 void eth_send_frame(struct ether_header *eh, size_t act_len);
 
-bool eth_match_src_addr(const struct ether_header *eh, size_t act_len, const in_addr_t check_adr);
+bool ipv4_match_src_addr(const struct ether_header *eh, size_t act_len, const in_addr_t check_adr);
 
 void eth_print_details(const struct ether_header *eh, size_t act_len);
 void eth_print_mac(const struct ether_header *eh);

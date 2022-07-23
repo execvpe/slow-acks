@@ -28,7 +28,7 @@ static int fwd_sock = -1;
 
 static uint8_t interface_mac[6];
 
-struct sockaddr_ll rcv_meta;
+static struct sockaddr_ll rcv_meta;
 
 void eth_init(const char *network_interface, const uint8_t gateway_mac[6]) {
 	// ETH_P_IP:   IPv4 only
@@ -115,7 +115,7 @@ void eth_send_frame(struct ether_header *eh, size_t act_len) {
 	}
 }
 
-bool eth_match_src_addr(const struct ether_header *eh, size_t act_len, const in_addr_t check_adr) {
+bool ipv4_match_src_addr(const struct ether_header *eh, size_t act_len, const in_addr_t check_adr) {
 #ifndef IPv4_ONLY
 	if (eh->ether_type != htons(0x0800)) { // IPv4 (0x0800)
 		return NULL;
@@ -144,7 +144,7 @@ void eth_print_details(const struct ether_header *eh, size_t act_len) {
 	}
 
 	if (eh->ether_type != htons(0x0800)) { // IPv4 (0x0800)
-		printf("Ether type: %04x (Other)\nSkip.\n", ntohs(eh->ether_type));
+		printf("Ether type: 0x%04x (Other)\nSkip.\n", ntohs(eh->ether_type));
 		return;
 	}
 
@@ -161,6 +161,11 @@ void eth_print_details(const struct ether_header *eh, size_t act_len) {
 	socket_address.sin_addr.s_addr = ip_packet->daddr;
 	printf("Destination Address: %s\n", (char *) inet_ntoa(socket_address.sin_addr));
 
+	if (ip_packet->protocol == 0x06) { // TCP (0x06)
+		printf("Protocol: 0x06 (TCP)\n");
+	} else {
+		printf("Protocol: 0x%02x (Other)\n", ip_packet->protocol);
+	}
 	printf("Identification: %d\n", ntohs(ip_packet->id));
 }
 

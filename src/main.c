@@ -21,7 +21,8 @@
 
 #define WRITE(S) write(STDERR_FILENO, (S), strlen(S))
 
-#define ETH_FRAME_SIZE 2048 // 1514 ok
+// Type "ip link" to get your interface MTU
+#define ETH_FRAME_SIZE     1514 // (= MTU + 14)
 #define PACKET_BUFFER_SIZE 512
 
 struct fwd_package {
@@ -34,11 +35,11 @@ static bbuf_t *packet_buffer       = NULL;
 
 static void release_and_clean(int signum) {
 	(void) signum;
-	WRITE("Interrupted.\n");
+	WRITE("[slow] Interrupted\n");
 
 	// Close raw sockets
 	eth_deinit();
-	WRITE("Sockets closed\n");
+	WRITE("[slow] Sockets closed\n");
 
 	// Clear memory TODO
 	// memset(raw_data, 0x00, ETH_FRAME_SIZE);
@@ -105,7 +106,7 @@ int main(int argc, char **argv) {
 
 		pak->act_len = (size_t) eth_receive_frame(pak->eh, ETH_FRAME_SIZE);
 
-		if (!eth_match_src_addr(pak->eh, pak->act_len, fwd_address)) {
+		if (!ipv4_match_src_addr(pak->eh, pak->act_len, fwd_address)) {
 			free(pak);
 			continue;
 		}
