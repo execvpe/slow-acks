@@ -162,8 +162,8 @@ void eth_print_details(const struct ether_header *eh, size_t act_len) {
 }
 
 void eth_print_mac(const struct ether_header *eh) {
-	printf("[Rcv] Src MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", eh->ether_shost[0], eh->ether_shost[1], eh->ether_shost[2],
+	printf("Src MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", eh->ether_shost[0], eh->ether_shost[1], eh->ether_shost[2],
 		   eh->ether_shost[3], eh->ether_shost[4], eh->ether_shost[5]);
-	printf("[Rcv] Dst MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", eh->ether_dhost[0], eh->ether_dhost[1], eh->ether_dhost[2],
+	printf("Dst MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", eh->ether_dhost[0], eh->ether_dhost[1], eh->ether_dhost[2],
 		   eh->ether_dhost[3], eh->ether_dhost[4], eh->ether_dhost[5]);
 }

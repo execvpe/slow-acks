@@ -72,6 +72,11 @@ static void *worker(void *arg) {
 	while (1) {
 		struct fwd_package *pak = bbuf_get(packet_buffer);
 		nanosleep((struct timespec *) arg, NULL);
+
+		printf("\n");
+		eth_print_details(pak->eh, pak->act_len);
+		eth_print_mac(pak->eh);
+
 		eth_send_frame(pak->eh, pak->act_len);
 		free(pak);
 	}
@@ -192,10 +197,6 @@ int main(int argc, char **argv) {
 			free(pak);
 			continue;
 		}
-
-		printf("\n");
-		eth_print_details(pak->eh, pak->act_len);
-		eth_print_mac(pak->eh);
 
 		if (!bbuf_put_nonblock(packet_buffer, pak)) {
 			// Drop ethernet frame if buffer is full
