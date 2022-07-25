@@ -13,15 +13,7 @@
 
 #define IPv4_ONLY 1
 
-static void die(const char *msg) {
-	if (errno) {
-		fprintf(stderr, "[EXIT %d] (%s) %s\n", errno, strerror(errno), msg);
-	} else {
-		fprintf(stderr, "[EXIT] %s\n", msg);
-	}
-
-	exit(EXIT_FAILURE);
-}
+extern void die(const char *msg);
 
 static int rcv_sock = -1;
 static int fwd_sock = -1;

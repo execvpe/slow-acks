@@ -17,21 +17,24 @@
 #include "bounded_buffer.h"
 #include "eth_packet.h"
 
-#define NANOSEC(MS) (MS * 1000000)
-
 #define WRITE(S) write(STDERR_FILENO, (S), strlen(S))
 
-// Type "ip link" to get your interface MTU
-#define ETH_FRAME_SIZE     1514 // (= MTU + 14)
-#define PACKET_BUFFER_SIZE 512
+// Use shell command "ip link" to get your interface MTU
+#define ETH_FRAME_SIZE 1514 // (= MTU + 14)
 
 struct fwd_package {
 	size_t act_len;
 	struct ether_header eh[];
 };
 
-static const uint8_t gateway_mac[] = {0xcc, 0xce, 0x1e, 0x3a, 0x40, 0xe8};
-static bbuf_t *packet_buffer       = NULL;
+static uint8_t gateway_mac[8] = {0};
+static char *interface_name   = NULL;
+
+static in_addr_t forwarding_address     = 0;
+static struct timespec forwarding_delay = {0};
+
+static bbuf_t *packet_buffer     = NULL;
+static size_t packet_buffer_size = 32;
 
 static void release_and_clean(int signum) {
 	(void) signum;
@@ -76,25 +79,104 @@ static void *worker(void *arg) {
 	return NULL;
 }
 
-int main(int argc, char **argv) {
-	if (argc < 4) {
+void die(const char *msg) {
+	if (errno) {
+		fprintf(stderr, "[EXIT %d] (%s) %s\n", errno, strerror(errno), msg);
+	} else {
+		fprintf(stderr, "[EXIT] %s\n", msg);
+	}
+
+	exit(EXIT_FAILURE);
+}
+
+static void parse_args(int argc, char **argv) {
+	// name, delay, interface, fwd_ip, gateway_mac, bbuf_size
+	if (argc < 5) {
 		fprintf(stderr, "Missing argument!\n");
 		exit(EXIT_FAILURE);
 	}
+	// Illegal call to exec()
+	if (argc <= 0 || *argv == NULL) {
+		errno = EINVAL;
+		die("No filename (argv[0])");
+	}
+	// Just the program path
+	if (argc == 1) {
+		errno = EINVAL;
+		die("Missing argument(s)");
+	}
 
+	for (int i = 1; i < argc && argv[i] != NULL; i++) {
+		char *arg = argv[i];
+		if (strncmp(arg, "--", 2) != 0) {
+			errno = ENOTSUP;
+			die("Every argument must match \"--<key>=<value>\"!");
+		}
+		if (strncmp(arg, "--mac=", 6) == 0) {
+			if (sscanf(arg + 6, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx", gateway_mac, gateway_mac + 1,
+					   gateway_mac + 2, gateway_mac + 3, gateway_mac + 4, gateway_mac + 5)
+				!= 6) {
+				errno = EINVAL;
+				die("Invalid MAC address!");
+			}
+		}
+		if (strncmp(arg, "--ip=", 5) == 0) {
+			forwarding_address = inet_addr(arg + 5);
+			continue;
+		}
+		if (strncmp(arg, "--delay=", 8) == 0) {
+			long raw                 = atol(arg + 8);
+			forwarding_delay.tv_sec  = raw / 1000;
+			forwarding_delay.tv_nsec = (raw % 1000) * 1000000L;
+			continue;
+		}
+		if (strncmp(arg, "--ifnam=", 8) == 0) {
+			interface_name = arg + 8;
+			continue;
+		}
+		if (strncmp(arg, "--bbuf=", 7) == 0) {
+			packet_buffer_size = (size_t) atol(arg + 7);
+			continue;
+		}
+	}
+	if (interface_name == NULL) {
+		errno = ENOTSUP;
+		die("No interface name provided!");
+	}
+	if (forwarding_address == 0) {
+		errno = ENOTSUP;
+		die("No IPv4 address provided!");
+	}
+	for (size_t i = 0; i < 7; i++) {
+		if (i == 7) {
+			errno = ENOTSUP;
+			die("No MAC address provided!");
+		}
+		if (gateway_mac[i] != 0x00) {
+			break;
+		}
+	}
+
+	printf("Interface Name: %s\n", interface_name);
+	printf("Gateway MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", gateway_mac[0], gateway_mac[1], gateway_mac[2],
+		   gateway_mac[3], gateway_mac[4], gateway_mac[5]);
+	printf("Forwarding IP: %s\n", inet_ntoa((struct in_addr) {.s_addr = forwarding_address}));
+	printf("Forwarding Delay: %lu ms\n", (forwarding_delay.tv_sec * 1000) + (forwarding_delay.tv_nsec / 1000000));
+	printf("Packet Buffer Size: %lu Packets/Frames\n", packet_buffer_size);
+}
+
+int main(int argc, char **argv) {
+	parse_args(argc, argv);
 	signal_init();
+	eth_init(interface_name, gateway_mac);
 
-	const struct timespec delay = {.tv_sec = 0, .tv_nsec = NANOSEC(atoi(argv[1]))};
-	const in_addr_t fwd_address = inet_addr(argv[3]);
-	eth_init(argv[2], gateway_mac);
-
-	packet_buffer = bbuf_create(PACKET_BUFFER_SIZE);
+	packet_buffer = bbuf_create(packet_buffer_size);
 	if (packet_buffer == NULL) {
 		release_and_clean(SIGTERM);
 	}
 
 	pthread_t fwd_thread;
-	if (pthread_create(&fwd_thread, NULL, &worker, (void *) &delay) != 0) {
+	if (pthread_create(&fwd_thread, NULL, &worker, (void *) &forwarding_delay) != 0) {
 		release_and_clean(SIGTERM);
 	}
 
@@ -106,7 +188,7 @@ int main(int argc, char **argv) {
 
 		pak->act_len = (size_t) eth_receive_frame(pak->eh, ETH_FRAME_SIZE);
 
-		if (!ipv4_match_src_addr(pak->eh, pak->act_len, fwd_address)) {
+		if (!ipv4_match_src_addr(pak->eh, pak->act_len, forwarding_address)) {
 			free(pak);
 			continue;
 		}
