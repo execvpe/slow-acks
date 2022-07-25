@@ -95,11 +95,6 @@ void die(const char *msg) {
 }
 
 static void parse_args(int argc, char **argv) {
-	// name, delay, interface, fwd_ip, gateway_mac, bbuf_size
-	if (argc < 5) {
-		fprintf(stderr, "Missing argument!\n");
-		exit(EXIT_FAILURE);
-	}
 	// Illegal call to exec()
 	if (argc <= 0 || *argv == NULL) {
 		errno = EINVAL;
@@ -153,7 +148,7 @@ static void parse_args(int argc, char **argv) {
 		die("No IPv4 address provided!");
 	}
 	for (size_t i = 0; i < 7; i++) {
-		if (i == 7) {
+		if (i == 6) {
 			errno = ENOTSUP;
 			die("No MAC address provided!");
 		}
