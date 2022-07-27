@@ -153,11 +153,21 @@ void eth_print_details(const struct ether_header *eh, size_t act_len) {
 	socket_address.sin_addr.s_addr = ip_packet->daddr;
 	printf("Destination Address: %s\n", (char *) inet_ntoa(socket_address.sin_addr));
 
-	if (ip_packet->protocol == 0x06) { // TCP (0x06)
-		printf("Protocol: 0x06 (TCP)\n");
-	} else {
-		printf("Protocol: 0x%02x (Other)\n", ip_packet->protocol);
+	printf("Protocol: 0x%02x", ip_packet->protocol);
+	switch (ip_packet->protocol) {
+		case 0x01: // ICMP
+			printf(" (ICMP)\n");
+			break;
+		case 0x06: // TCP
+			printf(" (TCP)\n");
+			break;
+		case 0x11: // UDP
+			printf(" (UDP)\n");
+			break;
+		default:
+			printf(" (other)\n");
 	}
+
 	printf("Identification: %d\n", ntohs(ip_packet->id));
 }
 

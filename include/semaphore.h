@@ -26,7 +26,7 @@ typedef struct {
  * @param initVal The initial value of the semaphore.
  * @return Handle for the created semaphore, or @c NULL if an error occurred.
  */
-semaphore_t *sem_create(size_t initVal);
+semaphore_t *sem_create(size_t init_val);
 
 /**
  * @brief Destroys a semaphore and frees all associated resources.

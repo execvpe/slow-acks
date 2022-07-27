@@ -4,21 +4,22 @@
 #include <pthread.h> // pthread_mutex_init()
 #include <stdlib.h>  // calloc()
 
-semaphore_t *sem_create(size_t initVal) {
-	semaphore_t *const sem = calloc(1, sizeof(semaphore_t)); // returns {"void *", NULL}
+semaphore_t *sem_create(size_t init_val) {
+	int e;
+	semaphore_t *sem = calloc(1, sizeof(semaphore_t)); // returns {"void *", NULL}
 	if (sem == NULL) {
-		return NULL; // errno set by calloc
+		return NULL; // errno set by calloc(3)
 	}
 
-	int e = pthread_mutex_init(&sem->mutex, NULL); // returns {0}
-	if (e) {                                       // Should never happen according to manual page
+	e = pthread_mutex_init(&sem->mutex, NULL);
+	if (e) {
 		errno = e;
 		free(sem);
 		return NULL;
 	}
 
-	e = pthread_cond_init(&sem->condition, NULL); // returns {0}
-	if (e) {                                      // Should never happen according to manual page
+	e = pthread_cond_init(&sem->condition, NULL);
+	if (e) {
 		errno = e;
 		pthread_mutex_destroy(&sem->mutex);
 		// The return value of the above function is deliberately NOT stored in the
@@ -27,16 +28,18 @@ semaphore_t *sem_create(size_t initVal) {
 		return NULL;
 	}
 
-	sem->value = initVal;
+	sem->value = init_val;
 
 	return sem;
 }
 
 void sem_destroy(semaphore_t *sem) {
+	int e;
+
 	if (sem == NULL)
 		return;
 
-	int e = pthread_cond_destroy(&sem->condition); // returns {0, EBUSY}
+	e = pthread_cond_destroy(&sem->condition); // returns {0, EBUSY}
 	if (e) {
 		errno = e;
 		pthread_mutex_destroy(&sem->mutex); // returns {0, EBUSY}
