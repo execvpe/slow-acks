@@ -50,6 +50,32 @@ static void release_and_clean(int signum) {
 	exit(EXIT_SUCCESS);
 }
 
+static void modify_timespec(struct timespec *ts, signed long millis) {
+	long act_millis = ts->tv_sec * 1000000L + ts->tv_nsec / 1000L;
+	act_millis += millis;
+	if (act_millis < 0) {
+		ts->tv_sec  = 0;
+		ts->tv_nsec = 0;
+		return;
+	}
+	ts->tv_sec  = act_millis / 1000L;
+	ts->tv_nsec = (act_millis % 1000L) * 1000000L;
+}
+
+static void sigusr_handler(int signum) {
+	switch (signum) {
+		case SIGUSR1:
+			forwarding_delay.tv_sec  = 0;
+			forwarding_delay.tv_nsec = 0;
+			WRITE("[slow] SIGUSR1 | delay = 0\n");
+			break;
+		case SIGUSR2:
+			modify_timespec(&forwarding_delay, 5);
+			WRITE("[slow] SIGUSR2 | delay += 5\n");
+			break;
+	}
+}
+
 static void signal_init() {
 	struct sigaction ign = {
 		.sa_handler = SIG_IGN,
@@ -64,6 +90,14 @@ static void signal_init() {
 	sigemptyset(&term.sa_mask);
 	sigaction(SIGTERM, &term, NULL);
 	sigaction(SIGINT, &term, NULL);
+
+	struct sigaction sigusr = {
+		.sa_handler = &sigusr_handler,
+		.sa_flags   = SA_RESTART,
+	};
+	sigemptyset(&term.sa_mask);
+	sigaction(SIGUSR1, &sigusr, NULL);
+	sigaction(SIGUSR2, &sigusr, NULL);
 }
 
 static void *worker(void *arg) {
@@ -125,9 +159,7 @@ static void parse_args(int argc, char **argv) {
 			continue;
 		}
 		if (strncmp(arg, "--delay=", 8) == 0) {
-			long raw                 = atol(arg + 8);
-			forwarding_delay.tv_sec  = raw / 1000;
-			forwarding_delay.tv_nsec = (raw % 1000) * 1000000L;
+			modify_timespec(&forwarding_delay, atol(arg + 8));
 			continue;
 		}
 		if (strncmp(arg, "--ifnam=", 8) == 0) {
