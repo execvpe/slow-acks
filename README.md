@@ -1,4 +1,4 @@
-# Slow IPv4
+# Slow ACKs
 
 Delay outgoing packets / ACKs to artificially slow down your internet speed (IPv4 only).
 
